@@ -1,5 +1,5 @@
 # UNet-for-cross-sequence-MR-image-translations
-This code demonstrates a CNN U-NET using BRATS-2018 imaging dataset to perform end-to-end image translation across different MRI contrasts
+In this studt, we assessed the standard U-Net for end-to-end image translations across three MR image contrasts for the brain. 
 
 # Availability of data and materials
 The datasets analyzed during the current study are available in the BRATS 2018 challenge repository at https://www.med.upenn.edu/sbia/brats2018/data.html. 
