@@ -1,1 +1,190 @@
+from keras.layers import Conv2D, BatchNormalization, Activation, \
+    UpSampling2D, MaxPooling2D, Conv2DTranspose, Dropout, Concatenate, Input
+from keras.models import Model
+import random
+
+
+def conv_block(input, num_filters):
+    """ Convolutional Layers """
+    x = Conv2D(num_filters, 3, kernel_initializer='he_uniform', padding="same")(input)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
+
+    x = Conv2D(num_filters, 3, kernel_initializer='he_uniform', padding="same")(x)
+    x = BatchNormalization()(x)
+    x = Activation("relu")(x)
+    return x
+
+
+def encoder_block(input, num_filters):
+    """ Encoder Block """
+    x = conv_block(input, num_filters)
+    p = MaxPooling2D((2, 2))(x)
+    return x, p
+
+
+def decoder_block(input, skip_features, num_filters):
+    """ Decoder Block """
+    x = UpSampling2D((2, 2))(input)
+    # x = Conv2DTranspose(num_filters, 2, strides=2, padding="same")(input)
+    x = Concatenate()([x, skip_features])
+    x = conv_block(x, num_filters)
+    return x
+
+
+def build_2DUNet_model_v1(input_shape):
+    """ U-NET Architecture """
+    inputs = Input(input_shape, dtype='float32')
+    ini_numb_of_filters = 16
+
+    """ Eecoder 1, 2, 3, 4 """
+    s1, p1 = encoder_block(inputs, ini_numb_of_filters)
+    s2, p2 = encoder_block(p1, ini_numb_of_filters * 2)
+    s3, p3 = encoder_block(p2, ini_numb_of_filters * 4)
+    s4, p4 = encoder_block(p3, ini_numb_of_filters * 8)
+
+    """ Bridge """
+    b1 = conv_block(p4, ini_numb_of_filters * 16)
+
+    """ Decoder 1, 2, 3, 4 """
+    d1 = decoder_block(b1, s4, ini_numb_of_filters * 8)
+    d2 = decoder_block(d1, s3, ini_numb_of_filters * 4)
+    d3 = decoder_block(d2, s2, ini_numb_of_filters * 2)
+    d4 = decoder_block(d3, s1, ini_numb_of_filters)
+
+    """ Outputs  """
+    outputs = Conv2D(1, 1, padding="same", activation="linear")(d4)
+
+    from keras.optimizers import Adam
+    learning_rate = 0.001
+    optimizer = Adam(learning_rate)
+
+    model = Model(inputs=[inputs], outputs=[outputs])
+    model.compile(optimizer=optimizer, loss='mse', metrics=['accuracy', 'mae'])
+    return model
+
+
+def build_2DUNet_model_v2(input_shape):
+    """ 3D Standard U-NET Architecture
+    :param input_shape: (image height, image width, image depth, image channels)
+    :return: model
+    """
+    inputs = Input(input_shape)
+    ini_numb_of_filters = 16
+
+    """ Contraction path """
+    c1 = Conv2D(ini_numb_of_filters, 3, kernel_initializer='he_uniform', padding='same')(inputs)
+    c1 = BatchNormalization()(c1)
+    c1 = Activation("relu")(c1)
+    c1 = Dropout(0.1)(c1)
+    c1 = Conv2D(ini_numb_of_filters, 3, kernel_initializer='he_uniform', padding='same')(c1)
+    c1 = BatchNormalization()(c1)
+    c1 = Activation("relu")(c1)
+    p1 = MaxPooling2D((2, 2))(c1)
+
+    c2 = Conv2D(ini_numb_of_filters * 2, 3, kernel_initializer='he_uniform', padding='same')(p1)
+    c2 = BatchNormalization()(c2)
+    c2 = Activation("relu")(c2)
+    c2 = Dropout(0.1)(c2)
+    c2 = Conv2D(ini_numb_of_filters * 2, 3, kernel_initializer='he_uniform', padding='same')(c2)
+    c2 = BatchNormalization()(c2)
+    c2 = Activation("relu")(c2)
+    p2 = MaxPooling2D((2, 2))(c2)
+
+    c3 = Conv2D(ini_numb_of_filters * 4, 3, kernel_initializer='he_uniform', padding='same')(p2)
+    c3 = BatchNormalization()(c3)
+    c3 = Activation("relu")(c3)
+    c3 = Dropout(0.2)(c3)
+    c3 = Conv2D(ini_numb_of_filters * 4, 3, kernel_initializer='he_uniform', padding='same')(c3)
+    c3 = BatchNormalization()(c3)
+    c3 = Activation("relu")(c3)
+    p3 = MaxPooling2D((2, 2))(c3)
+
+    c4 = Conv2D(ini_numb_of_filters * 8, 3, kernel_initializer='he_uniform', padding='same')(p3)
+    c4 = BatchNormalization()(c4)
+    c4 = Activation("relu")(c4)
+    c4 = Dropout(0.2)(c4)
+    c4 = Conv2D(ini_numb_of_filters * 8, 3, kernel_initializer='he_uniform', padding='same')(c4)
+    c4 = BatchNormalization()(c4)
+    c4 = Activation("relu")(c4)
+    p4 = MaxPooling2D(pool_size=2)(c4)
+
+    c5 = Conv2D(ini_numb_of_filters * 16, 3, kernel_initializer='he_uniform', padding='same')(p4)
+    c5 = BatchNormalization()(c5)
+    c5 = Activation("relu")(c5)
+    c5 = Dropout(0.3)(c5)
+    c5 = Conv2D(ini_numb_of_filters * 16, 3, kernel_initializer='he_uniform', padding='same')(c5)
+    c5 = BatchNormalization()(c5)
+    c5 = Activation("relu")(c5)
+
+    """ Expansive path """
+    u6 = Conv2DTranspose(ini_numb_of_filters * 8, 2, strides=2, padding='same')(c5)
+    # u6 = UpSampling2D((2, 2), data_format="channels_last")(c5)
+    u6 = Concatenate([u6, c4])
+    c6 = Conv2D(ini_numb_of_filters * 8, 3, kernel_initializer='he_uniform', padding='same')(u6)
+    c6 = BatchNormalization()(c6)
+    c6 = Activation("relu")(c6)
+    c6 = Dropout(0.2)(c6)
+    c6 = Conv2D(ini_numb_of_filters * 8, 3, kernel_initializer='he_uniform', padding='same')(c6)
+    c6 = BatchNormalization()(c6)
+    c6 = Activation("relu")(c6)
+
+    u7 = Conv2DTranspose(ini_numb_of_filters * 4, 2, strides=2, padding='same')(c6)
+    # u7 = UpSampling2D((2, 2), data_format="channels_last")(c6)
+    u7 = Concatenate([u7, c3])
+    c7 = Conv2D(ini_numb_of_filters * 4, 3, kernel_initializer='he_uniform', padding='same')(u7)
+    c7 = BatchNormalization()(c7)
+    c7 = Activation("relu")(c7)
+    c7 = Dropout(0.2)(c7)
+    c7 = Conv2D(ini_numb_of_filters * 4, 3, kernel_initializer='he_uniform', padding='same')(c7)
+    c7 = BatchNormalization()(c7)
+    c7 = Activation("relu")(c7)
+
+    u8 = Conv2DTranspose(ini_numb_of_filters * 2, 2, strides=2, padding='same')(c7)
+    # u8 = UpSampling2D((2, 2), data_format="channels_last")(c7)
+    u8 = Concatenate([u8, c2])
+    c8 = Conv2D(ini_numb_of_filters * 2, 3, kernel_initializer='he_uniform', padding='same')(u8)
+    c8 = BatchNormalization()(c8)
+    c8 = Activation("relu")(c8)
+    c8 = Dropout(0.1)(c8)
+    c8 = Conv2D(ini_numb_of_filters * 2, 3, kernel_initializer='he_uniform', padding='same')(c8)
+    c8 = BatchNormalization()(c8)
+    c8 = Activation("relu")(c8)
+
+    u9 = Conv2DTranspose(ini_numb_of_filters, 2, strides=2, padding='same')(c8)
+    # u9 = UpSampling2D((2, 2), data_format="channels_last")(c8)
+    u9 = Concatenate([u9, c1])
+    c9 = Conv2D(ini_numb_of_filters, 3, kernel_initializer='he_uniform', padding='same')(u9)
+    c9 = BatchNormalization()(c9)
+    c9 = Activation("relu")(c9)
+    c9 = Dropout(0.1)(c9)
+    c9 = Conv2D(ini_numb_of_filters, 3, kernel_initializer='he_uniform', padding='same')(c9)
+    c9 = BatchNormalization()(c9)
+    c9 = Activation("relu")(c9)
+
+    outputs = Conv2D(1, 1, activation='linear')(c9)
+
+    from keras.optimizers import Adam
+    learning_rate = 0.001
+    optimizer = Adam(learning_rate)
+
+    model = Model(inputs=[inputs], outputs=[outputs])
+    model.compile(optimizer=optimizer, loss='mse', metrics=['accuracy', 'mae'])
+    return model
+
+
+# Print a summary of the model
+np.random.seed(42)  # seeding for consistency
+img_height = x_train.shape[1]  # 64
+img_width = x_train.shape[2]  # 64
+img_channels = x_train.shape[3]  # 12
+
+input_shape = (img_height, img_width, img_channels)
+
+model = build_2DUNet_model_v1(input_shape)
+# model = build_2DUNet_model_v2(input_shape)
+print(model.summary())
+print(model.input_shape)
+print(model.output_shape)
+
 
